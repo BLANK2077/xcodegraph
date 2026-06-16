@@ -63,11 +63,16 @@ class TestFormatNodeDetail:
         assert "uvm_driver" in out
         assert "stdlib" in out.lower()
 
-    def test_source_snippet_included(self):
+    def test_source_only_when_requested(self):
         node = {"kind": "module", "name": "m", "path": "rtl/top.sv", "line_start": 1,
                 "line_end": 3}
         edges = {}
-        out = formatter.format_node_detail(node, edges, source_lines=["module top;", "endmodule"])
+        # Default: no source
+        out = formatter.format_node_detail(node, edges)
+        assert "```" not in out
+        # source=true: source included
+        out = formatter.format_node_detail(node, edges, show_source=True,
+                                           source_lines=["module top;", "endmodule"])
         assert "```" in out
         assert "module top" in out
 

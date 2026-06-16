@@ -55,6 +55,13 @@ class TestMCPNode:
         assert "Location" in text
         # Should NOT contain DB internal fields
         assert '"id"' not in text
+        # Default: no source code
+        assert "```" not in text
+
+    def test_node_with_source(self, mcp_server):
+        text = _call(mcp_server, "xcodegraph_node", {"name": "top", "source": True})
+        assert "## top (module)" in text
+        assert "```" in text  # source requested
 
     def test_node_not_found(self, mcp_server):
         text = _call(mcp_server, "xcodegraph_node", {"name": "nonexistent"})

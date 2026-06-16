@@ -68,15 +68,15 @@ Best practices:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_node(name: str, kind: str | None = None) -> str:
-        """Get details for a symbol with relationships and source code."""
+    def xcodegraph_node(name: str, kind: str | None = None, source: bool = False) -> str:
+        """Get details for a symbol with relationships. Set source=true to include source code."""
         s = _storage()
         try:
             node = s.get_node(name, kind)
             if not node:
                 return f"## {name}\n\nNot found in index.\n"
             edges = s.get_edges_for_node(name)
-            return formatter.format_node_detail(node, edges)
+            return formatter.format_node_detail(node, edges, show_source=source)
         finally:
             s.close()
 

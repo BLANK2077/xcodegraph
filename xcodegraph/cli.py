@@ -42,6 +42,7 @@ def main() -> None:
     p = sub.add_parser("node", help="Show node details")
     p.add_argument("name")
     p.add_argument("--kind", "-k")
+    p.add_argument("--source", action="store_true", help="Include source code")
     p.add_argument("--db", default=DB_DEFAULT)
     p.add_argument("--json", action="store_true")
 
@@ -169,7 +170,8 @@ def cmd_node(args: argparse.Namespace) -> None:
         node = s.get_node(args.name, args.kind)
         if not node: print(f"Not found: {args.name}", file=sys.stderr); sys.exit(1)
         edges = s.get_edges_for_node(args.name)
-        _out(formatter.format_node_detail(node, edges), args, raw_data={"node": node, "edges": edges})
+        _out(formatter.format_node_detail(node, edges, show_source=args.source),
+             args, raw_data={"node": node, "edges": edges})
     finally: s.close()
 
 

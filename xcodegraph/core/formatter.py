@@ -104,8 +104,9 @@ def format_search_results(query: str, results: list[dict],
 
 def format_node_detail(node: dict, edges: dict,
                        source_lines: list[str] | None = None,
+                       show_source: bool = False,
                        lib_paths: list[str] | None = None) -> str:
-    """Rendered node detail with relationships and optional source."""
+    """Rendered node detail with relationships. Source only when show_source=True."""
     name = node["name"]
     kind = node["kind"]
     file_path = node.get("path", "")
@@ -143,22 +144,26 @@ def format_node_detail(node: dict, edges: dict,
 
     lines.append("")
 
-    # Source snippet
-    if source_lines:
-        lines.append("### Source")
-        lines.append(f"```systemverilog")
-        for i, line_text in enumerate(source_lines, start=node.get("line_start", 1)):
-            lines.append(f"  {i:4d} │ {line_text.rstrip()}")
-        lines.append("```")
-    elif file_path and line and os.path.exists(file_path):
-        end = node.get("line_end", line + 1)
-        src = _source_snippet(file_path, line, end)
-        if src:
+    # Source snippet — only when explicitly requested
+    if show_source:
+        if source_lines:
             lines.append("### Source")
-            lines.append(src)
+            lines.append("```systemverilog")
+            for i, line_text in enumerate(source_lines, start=node.get("line_start", 1)):
+                lines.append(f"  {i:4d} │ {line_text.rstrip()}")
+            lines.append("```")
+        elif file_path and line and os.path.exists(file_path):
+            end = node.get("line_end", line + 1)
+            src = _source_snippet(file_path, line, end)
+            if src:
+                lines.append("### Source")
+                lines.append(src)
 
     # Tail guidance
-    lines.append(f"→ Use `xcodegraph_node <name>` for other symbols")
+    if not show_source:
+        lines.append(f"→ Use `xcodegraph_node {name} source=true` for full source code")
+    else:
+        lines.append(f"→ Use `xcodegraph_node <name>` for other symbols")
     return "\n".join(lines)
 
 
