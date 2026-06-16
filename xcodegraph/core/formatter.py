@@ -200,33 +200,37 @@ def format_hierarchy(hierarchy: list[dict], top_name: str,
 
     lines = [f"## Hierarchy: {top_name}", ""]
 
-    # Group by depth, track last-child markers
-    depth_counts: dict[int, int] = {}
+    # Build parent→children mapping for tree rendering
+    parent_children: dict[str, list[dict]] = {}
+    node_map: dict[str, dict] = {}
     for h in hierarchy:
-        d = h.get("depth", 0)
-        depth_counts[d] = depth_counts.get(d, 0) + 1
-    depth_seen: dict[int, int] = {}
+        name = h["name"]
+        node_map[name] = h
+        parent = h.get("parent_name", "")
+        if parent:
+            parent_children.setdefault(parent, [])
+            parent_children[parent].append(h)
 
-    for h in hierarchy:
-        depth = h.get("depth", 0)
-        if depth > max_depth:
-            lines.append(f"*... ({len(hierarchy) - len(lines) + 2} more levels truncated)*")
-            break
+    def _render_tree(name: str, prefix: str, is_last_sibling: bool) -> None:
+        h = node_map.get(name)
+        if not h:
+            return
+        connector = "└── " if is_last_sibling else "├── "
+        lines.append(f"{prefix}{connector}{name} ({h.get('path', '')}:{h.get('line_start', '')})")
+        children = parent_children.get(name, [])
+        for i, child in enumerate(children):
+            child_is_last = (i == len(children) - 1)
+            child_prefix = prefix + ("    " if is_last_sibling else "│   ")
+            _render_tree(child["name"], child_prefix, child_is_last)
 
-        depth_seen[depth] = depth_seen.get(depth, 0) + 1
-        is_last = (depth_seen[depth] == depth_counts[depth])
-
-        # Build prefix with vertical lines
-        prefix_parts = []
-        for d in range(1, depth + 1):
-            prev_depth_last = depth_seen.get(d, 0) == depth_counts.get(d, 0) or (d == depth and is_last)
-            if d == depth:
-                prefix_parts.append("└── " if is_last else "├── ")
-            else:
-                # Check if there are more siblings at this level
-                prefix_parts.append("    " if prev_depth_last else "│   ")
-        prefix = "".join(prefix_parts)
-        lines.append(f"{prefix}{h['name']} ({h.get('path', '')}:{h.get('line_start', '')})")
+    # Root node
+    root = hierarchy[0] if hierarchy else None
+    if root:
+        lines.append(f"{root['name']} ({root.get('path', '')}:{root.get('line_start', '')})")
+        root_children = parent_children.get(root["name"], [])
+        for i, child in enumerate(root_children):
+            child_is_last = (i == len(root_children) - 1)
+            _render_tree(child["name"], "", child_is_last)
 
     lines.append(f"\n→ Use `xcodegraph_instantiated_by <module>` to find instantiators")
     return "\n".join(lines)

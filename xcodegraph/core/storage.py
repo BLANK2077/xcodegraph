@@ -258,15 +258,21 @@ class Storage:
             return []
 
         visited: set[int] = {top["id"]}
-        frontier = [(top, 0)]
+        frontier: list[tuple[dict, tuple[int, str] | int]] = [(top, 0)]  # (node, depth) or (node, (depth, parent))
         result: list[dict] = []
 
         while frontier:
-            current, d = frontier.pop(0)
+            current, parent_name = frontier.pop(0)
             current_with_depth = dict(current)
-            current_with_depth["depth"] = d
+            # parent_name is either str or a tuple (d, parent_name)
+            if isinstance(parent_name, int):
+                current_with_depth["depth"] = parent_name
+            else:
+                current_with_depth["depth"] = parent_name[0]
+                current_with_depth["parent_name"] = parent_name[1]
             result.append(current_with_depth)
-            if d >= depth:
+            cur_depth = current_with_depth.get("depth", 0)
+            if cur_depth >= depth:
                 continue
 
             # Check resolved edges
@@ -299,10 +305,11 @@ class Storage:
             for row in ref_rows:
                 all_rows[row["id"]] = dict(row)
 
+            current_name = current.get("name", "")
             for node_id, row_data in all_rows.items():
                 if node_id not in visited:
                     visited.add(node_id)
-                    frontier.append((row_data, d + 1))
+                    frontier.append((row_data, (cur_depth + 1, current_name)))
 
         return result
 
