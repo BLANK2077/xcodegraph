@@ -72,7 +72,7 @@ class TestPlusArgs:
             "top.sv",
         ], {"top.sv": "//"})
         result = FilelistParser().parse(fp)
-        assert result.defines.get("SIMULATION") == ""
+        assert result.defines.get("SIMULATION") == "1"  # VCS: bare define → "1"
         assert result.defines.get("DATA_WIDTH") == "64"
 
     def test_define_without_value(self, make_filelist):
@@ -81,7 +81,7 @@ class TestPlusArgs:
             "top.sv",
         ], {"top.sv": "//"})
         result = FilelistParser().parse(fp)
-        assert result.defines["DEBUG"] == ""
+        assert result.defines["DEBUG"] == "1"  # VCS: bare define → "1"
 
 
 class TestNestedFilelists:
@@ -136,12 +136,96 @@ class TestEnvVarExpansion:
         monkeypatch.setenv("PROJ_ROOT", "/home/project")
         fp = make_filelist("test.f", [
             "${PROJ_ROOT}/rtl/top.sv",
-        ], {"${PROJ_ROOT}/rtl/top.sv": "//"})  # won't match after expansion
-        # Actually the make_filelist creates the file first, then parser tries
-        # to resolve ${PROJ_ROOT}. Since we can't easily test with real env vars
-        # without creating the actual path, just verify expansion happened.
+        ], {"${PROJ_ROOT}/rtl/top.sv": "//"})
         result = FilelistParser().parse(fp)
         if result.errors:
-            # File won't exist at expanded path unless we created it
-            # This is expected behavior
             pass
+
+
+# ── xcg.md Section 12: VCS filelist 兼容性增强 ──
+
+class TestMultiIncDir:
+    """+incdir+a+b+c format (VCS multi-path)."""
+
+    def test_multi_plus_incdir_split(self, make_filelist):
+        fp = make_filelist("test.f", [
+            "+incdir+./a+./b+./c",
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        assert len(result.incdirs) == 3
+        assert any("a" in d for d in result.incdirs)
+        assert any("b" in d for d in result.incdirs)
+        assert any("c" in d for d in result.incdirs)
+
+    def test_multi_plus_define_bare_defaults_to_1(self, make_filelist):
+        fp = make_filelist("test.f", [
+            "+define+USE_AXI+DATA_WIDTH=64",
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        assert result.defines.get("USE_AXI") == "1"
+        assert result.defines.get("DATA_WIDTH") == "64"
+
+    def test_multi_define_all_bare(self, make_filelist):
+        fp = make_filelist("test.f", [
+            "+define+A+B+C",
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        assert result.defines.get("A") == "1"
+        assert result.defines.get("B") == "1"
+        assert result.defines.get("C") == "1"
+
+
+class TestBackslashContinuation:
+    """\\ line continuation in filelist."""
+
+    def test_backslash_continuation_joins_lines(self, make_filelist):
+        fp = make_filelist("test.f", [
+            "+incdir+./a \\",
+            "  +./b",
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        # Merged line: "+incdir+./a   +./b" → split on + → [./a, ./b]
+        assert len(result.incdirs) >= 1
+        assert any("a" in d for d in result.incdirs)
+
+
+class TestQuotedPaths:
+    """Quoted path handling in filelist."""
+
+    def test_quoted_incdir_strips_quotes(self, make_filelist):
+        fp = make_filelist("test.f", [
+            '+incdir+"./my path/"',
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        assert len(result.incdirs) == 1
+        incdir = result.incdirs[0]
+        assert '"' not in incdir
+
+
+class TestVCSOptions:
+    """VCS compile options should NOT be treated as source files."""
+
+    def test_vcs_options_not_in_files(self, make_filelist):
+        fp = make_filelist("test.f", [
+            "-sverilog",
+            "-timescale=1ns/1ps",
+            "-full64",
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        # Only top.sv should be in files
+        assert len(result.files) == 1
+        assert "top.sv" in result.files[0]
+
+    def test_vcs_option_generates_warning(self, make_filelist):
+        fp = make_filelist("test.f", [
+            "-sverilog",
+            "top.sv",
+        ], {"top.sv": "//"})
+        result = FilelistParser().parse(fp)
+        assert any("sverilog" in w for w in result.warnings)

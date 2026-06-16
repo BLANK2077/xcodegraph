@@ -32,16 +32,9 @@ class Indexer:
         indexed_files = 0
         errors: list[str] = []
 
+        # xcg.md Step 2: +incdir+ is only include search path, NOT source list.
+        # Only filelist-explicit source files get indexed.
         all_files = list(fl_result.files)
-
-        # Discover include files from +incdir+ paths (.svh/.vh/.sv/.v)
-        for incdir in fl_result.incdirs:
-            if os.path.isdir(incdir):
-                for fn in sorted(os.listdir(incdir)):
-                    if self._is_sv_file(fn):
-                        inc_path = os.path.join(incdir, fn)
-                        if inc_path not in all_files:
-                            all_files.append(inc_path)
 
         for src_path in all_files:
             if self._is_sv_file(src_path):

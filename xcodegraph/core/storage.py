@@ -76,8 +76,17 @@ class Storage:
     # ── extraction storage ──────────────────────────────────────────────
 
     def store_extraction(self, file_record: FileRecord, result: ExtractionResult) -> int:
-        """Store extracted nodes/edges/refs; return node count."""
+        """Store extracted nodes/edges/refs; return node count.
+
+        Idempotent: clears old data for this file before inserting.
+        """
         file_id = file_record.id or 0
+
+        # Clear old extraction data for this file (xcg.md Step 1: idempotency)
+        self.conn.execute("DELETE FROM unresolved_refs WHERE file_id = ?", (file_id,))
+        self.conn.execute("DELETE FROM edges WHERE file_id = ?", (file_id,))
+        self.conn.execute("DELETE FROM nodes WHERE file_id = ?", (file_id,))
+
         node_map: dict[str, int] = {}  # external_id → DB rowid
 
         # Insert nodes
