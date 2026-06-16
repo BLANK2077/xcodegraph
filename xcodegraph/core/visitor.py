@@ -436,11 +436,24 @@ class SVEVisitor:
 
     def _instantiation(self, node: TSNode, ctx: ExtractionContext) -> bool:
         instance_type = _child_text(node, "instance_type")
-        if instance_type:
-            ctx.add_reference(
-                _clean(instance_type).split("::")[-1],
-                "INSTANTIATES", node,
-            )
+        inst_name = _clean(instance_type).split("::")[-1] if instance_type else None
+
+        if inst_name:
+            # Try same-file resolution: if the target module/interface
+            # has already been extracted, create an edge immediately.
+            target = ctx.find_node_by_name(inst_name, "module") or \
+                     ctx.find_node_by_name(inst_name, "interface")
+            if target:
+                scope_id = ctx.current_scope_id()
+                scope_node = ctx._find_node(scope_id)
+                ctx.add_edge(
+                    scope_id, target.id, "INSTANTIATES",
+                    src_name=scope_node.name if scope_node else "",
+                    dst_name=inst_name,
+                    line=node.start_point[0] + 1,
+                )
+            else:
+                ctx.add_reference(inst_name, "INSTANTIATES", node)
         self._visit_children(node, ctx)
         return True
 

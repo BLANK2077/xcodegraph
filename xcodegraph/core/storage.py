@@ -210,7 +210,10 @@ class Storage:
         return result
 
     def get_hierarchy(self, top_name: str, depth: int = 10) -> list[dict]:
-        """BFS from a top node following INSTANTIATES edges."""
+        """BFS from a top node following INSTANTIATES edges.
+
+        Checks both resolved edges and unresolved_refs (lightweight resolve).
+        """
         top = self.get_node(top_name)
         if not top:
             return []
@@ -227,7 +230,8 @@ class Storage:
             if d >= depth:
                 continue
 
-            rows = self.conn.execute(
+            # Check resolved edges
+            edge_rows = self.conn.execute(
                 """SELECT dn.*, f.path
                    FROM edges e
                    JOIN nodes sn ON e.src_id = sn.id
@@ -237,21 +241,42 @@ class Storage:
                 (current["id"],),
             ).fetchall()
 
-            for row in rows:
-                node_id = row["id"]
+            # Also check unresolved refs for INSTANTIATES
+            current_file_id = current.get("file_id")
+            ref_rows = self.conn.execute(
+                """SELECT n.*, f.path
+                   FROM unresolved_refs ur
+                   JOIN nodes n ON ur.name = n.name
+                   JOIN files f ON n.file_id = f.id
+                   WHERE ur.kind = 'INSTANTIATES'
+                     AND ur.file_id = ?
+                     AND ur.context_node_id IS NOT NULL""",
+                (current_file_id,),
+            ).fetchall() if current_file_id else []
+
+            all_rows = {}
+            for row in edge_rows:
+                all_rows[row["id"]] = dict(row)
+            for row in ref_rows:
+                all_rows[row["id"]] = dict(row)
+
+            for node_id, row_data in all_rows.items():
                 if node_id not in visited:
                     visited.add(node_id)
-                    frontier.append((dict(row), d + 1))
+                    frontier.append((row_data, d + 1))
 
         return result
 
     def get_instantiated_by(self, name: str) -> list[dict]:
-        """Return all nodes that instantiate the named module/interface."""
+        """Return all nodes that instantiate the named module/interface.
+
+        Checks both resolved edges and unresolved_refs."""
         target = self.get_node(name)
         if not target:
             return []
 
-        rows = self.conn.execute(
+        # Resolved edges
+        edge_rows = self.conn.execute(
             """SELECT sn.*, f.path
                FROM edges e
                JOIN nodes sn ON e.src_id = sn.id
@@ -259,7 +284,27 @@ class Storage:
                WHERE e.kind = 'INSTANTIATES' AND e.dst_id = ?""",
             (target["id"],),
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        # Unresolved refs: find nodes whose file has INSTANTIATES ref to `name`
+        ref_rows = self.conn.execute(
+            """SELECT DISTINCT n.*, f.path
+               FROM unresolved_refs ur
+               JOIN files src_f ON ur.file_id = src_f.id
+               JOIN nodes n ON n.file_id = src_f.id
+               JOIN files f ON n.file_id = f.id
+               WHERE ur.kind = 'INSTANTIATES' AND ur.name = ?""",
+            (name,),
+        ).fetchall()
+
+        seen = set()
+        result = []
+        for row in edge_rows + ref_rows:
+            r = dict(row)
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                result.append(r)
+
+        return result
 
     def get_edges_by_kind(self, name: str, kind: str) -> list[dict]:
         """Generic query for IMPORTS/EXTENDS/INCLUDES edges."""
