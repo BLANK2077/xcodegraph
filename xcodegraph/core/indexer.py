@@ -53,6 +53,8 @@ class Indexer:
         self.storage.set_meta("updated_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
         self.storage.set_meta("backend", "tree-sitter")
         self.storage.set_meta("schema_version", "1")
+        # Record git HEAD for stale detection
+        self._record_git_head()
 
         return {
             "indexed_files": indexed_files,
@@ -102,3 +104,30 @@ class Indexer:
 
     def close(self) -> None:
         self.storage.close()
+
+    def resolve_references(self) -> dict:
+        """Run cross-file reference resolution. Returns {total, resolved, remaining}."""
+        from .resolver import ReferenceResolver
+        r = ReferenceResolver()
+        return r.resolve(self.storage)
+
+    def _record_git_head(self) -> None:
+        """Record current git HEAD for stale detection."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                head = result.stdout.strip()
+                self.storage.set_meta("git_head", head)
+                # Also get branch
+                branch = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if branch.returncode == 0:
+                    self.storage.set_meta("git_branch", branch.stdout.strip())
+        except Exception:
+            pass  # not a git repo or git not available

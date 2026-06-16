@@ -85,3 +85,30 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- ── FTS5 full-text search ──────────────────────────────────────────────
+
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    name,
+    full_name,
+    signature,
+    content='nodes',
+    content_rowid='id'
+);
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_ai AFTER INSERT ON nodes BEGIN
+    INSERT INTO nodes_fts(rowid, name, full_name, signature)
+    VALUES (new.id, new.name, new.full_name, new.signature);
+END;
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_ad AFTER DELETE ON nodes BEGIN
+    INSERT INTO nodes_fts(nodes_fts, rowid, name, full_name, signature)
+    VALUES ('delete', old.id, old.name, old.full_name, old.signature);
+END;
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE ON nodes BEGIN
+    INSERT INTO nodes_fts(nodes_fts, rowid, name, full_name, signature)
+    VALUES ('delete', old.id, old.name, old.full_name, old.signature);
+    INSERT INTO nodes_fts(rowid, name, full_name, signature)
+    VALUES (new.id, new.name, new.full_name, new.signature);
+END;

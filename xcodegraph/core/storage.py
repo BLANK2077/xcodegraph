@@ -150,8 +150,27 @@ class Storage:
     # ── queries ─────────────────────────────────────────────────────────
 
     def search_nodes(self, query: str, kind: str | None = None) -> list[dict]:
+        """Full-text search via FTS5, with LIKE fallback."""
+        # Try FTS5 first — handles multi-word queries and ranks results
+        try:
+            fts_query = _to_fts_query(query)
+            params: list = [fts_query]
+            join = "JOIN nodes_fts ON n.id = nodes_fts.rowid"
+            where = "nodes_fts MATCH ?"
+            order = "ORDER BY rank"
+            if kind:
+                where += " AND n.kind = ?"
+                params.append(kind)
+            sql = f"SELECT n.*, f.path FROM nodes n {join} JOIN files f ON n.file_id = f.id WHERE {where} {order} LIMIT 50"
+            rows = self.conn.execute(sql, params).fetchall()
+            if rows:
+                return [dict(r) for r in rows]
+        except Exception:
+            pass  # FTS5 may fail on special chars; fall through to LIKE
+
+        # LIKE fallback
         sql = "SELECT n.*, f.path FROM nodes n JOIN files f ON n.file_id = f.id WHERE n.name LIKE ?"
-        params: list = [f"%{query}%"]
+        params = [f"%{query}%"]
         if kind:
             sql += " AND n.kind = ?"
             params.append(kind)
@@ -304,14 +323,15 @@ class Storage:
             (target["id"],),
         ).fetchall()
 
-        # Unresolved refs: find nodes whose file has INSTANTIATES ref to `name`
+        # Unresolved refs: find instantiator modules
         ref_rows = self.conn.execute(
             """SELECT DISTINCT n.*, f.path
                FROM unresolved_refs ur
                JOIN files src_f ON ur.file_id = src_f.id
                JOIN nodes n ON n.file_id = src_f.id
                JOIN files f ON n.file_id = f.id
-               WHERE ur.kind = 'INSTANTIATES' AND ur.name = ?""",
+               WHERE ur.kind = 'INSTANTIATES' AND ur.name = ?
+                 AND n.kind IN ('module', 'interface')""",
             (name,),
         ).fetchall()
 
@@ -351,3 +371,15 @@ class Storage:
 
     def close(self) -> None:
         self.conn.close()
+
+
+def _to_fts_query(user_query: str) -> str:
+    """Convert a user search string to an FTS5 query.
+
+    Multi-word queries become AND terms: "axi master" → "axi AND master"
+    Single-word queries are quoted for exact prefix match.
+    """
+    terms = user_query.strip().split()
+    if len(terms) == 1:
+        return f'"{terms[0]}"*'
+    return " AND ".join(f'"{t}"*' for t in terms)
