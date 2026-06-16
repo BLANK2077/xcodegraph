@@ -534,7 +534,11 @@ class SVEVisitor:
     # ── verification: constraints ───────────────────────────────────────
 
     def _constraint(self, node: TSNode, ctx: ExtractionContext) -> bool:
-        name = _child_text(node, "name") or f"constraint_{node.start_point[0]+1}"
+        # constraint_declaration: 'constraint' simple_identifier constraint_block
+        name = _child_text(node, "name") or (
+            _clean(ts_node_text(node.named_children[0]))
+            if node.named_children else None
+        ) or f"constraint_{node.start_point[0]+1}"
         created = ctx.create_node("constraint", _clean(name), node,
                                   signature=_first_line(node))
         if not created:
