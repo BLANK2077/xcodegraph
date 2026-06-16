@@ -65,7 +65,7 @@ class TestMCPStdioTools:
 
     def test_status(self, indexed_db):
         text = _run_mcp_call(indexed_db, "xcodegraph_status", {})
-        assert "ok" in text.lower()
+        assert "Status" in text
 
     def test_search(self, indexed_db):
         text = _run_mcp_call(indexed_db, "xcodegraph_search", {"query": "top"})
@@ -73,7 +73,7 @@ class TestMCPStdioTools:
 
     def test_node(self, indexed_db):
         text = _run_mcp_call(indexed_db, "xcodegraph_node", {"name": "top"})
-        assert "ok" in text.lower() or "module" in text.lower()
+        assert "top" in text and "(module)" in text
 
     def test_definition(self, indexed_db):
         text = _run_mcp_call(indexed_db, "xcodegraph_definition", {"name": "top"})

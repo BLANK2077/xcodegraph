@@ -1,6 +1,7 @@
 """XCodeGraph MCP Server — thin adapter over core API, powered by official MCP SDK.
 
-Architecture: MCP handler → parameter validation → core API → format → return
+All tools return Markdown strings for direct AI consumption.
+Architecture: MCP handler → parameter validation → core API → format_*() → return str
 Never: parsing logic, SQL queries, or business state in handlers.
 """
 
@@ -12,8 +13,8 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from xcodegraph.core.storage import Storage
+from xcodegraph.core import formatter
 
-# Global reference — set by create_server() before tools are called
 _DB_PATH: str = ""
 
 
@@ -22,12 +23,6 @@ def _storage() -> Storage:
 
 
 def create_server(db_path: str) -> FastMCP:
-    """Create a configured FastMCP server tied to a database path.
-
-    Usage:
-        mcp = create_server(".xcodegraph/index.sqlite")
-        mcp.run(transport="stdio")
-    """
     global _DB_PATH
     _DB_PATH = db_path
 
@@ -54,177 +49,120 @@ Best practices:
     # ── tools ──────────────────────────────────────────────────────
 
     @mcp.tool()
-    def xcodegraph_status() -> dict[str, Any]:
+    def xcodegraph_status() -> str:
         """Get index status: file/node/edge counts and metadata."""
         s = _storage()
         try:
-            stats = s.stats()
-            meta = s.get_all_meta()
-            return {"status": "ok", **stats, "db_path": _DB_PATH, "meta": meta}
+            return formatter.format_status(s.stats(), s.get_all_meta())
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_search(query: str, kind: str | None = None) -> dict[str, Any]:
-        """Search for SystemVerilog symbols by name. Optionally filter by kind (module/class/interface/parameter/typedef/property/sequence/constraint/covergroup)."""
+    def xcodegraph_search(query: str, kind: str | None = None) -> str:
+        """Search for SystemVerilog symbols by name. Returns Markdown table."""
         s = _storage()
         try:
             results = s.search_nodes(query, kind)
-            return {
-                "status": "ok",
-                "count": len(results),
-                "results": [
-                    {"kind": r["kind"], "name": r["name"], "file": r["path"], "line": r["line_start"]}
-                    for r in results
-                ],
-            }
+            return formatter.format_search_results(query, results)
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_node(name: str, kind: str | None = None) -> dict[str, Any]:
-        """Get details for a named code symbol including related edges (CONTAINS, EXTENDS, INSTANTIATES, IMPORTS, CALLS)."""
+    def xcodegraph_node(name: str, kind: str | None = None) -> str:
+        """Get details for a symbol with relationships and source code."""
         s = _storage()
         try:
             node = s.get_node(name, kind)
             if not node:
-                return {"status": "not_found", "name": name}
+                return f"## {name}\n\nNot found in index.\n"
             edges = s.get_edges_for_node(name)
-            return {
-                "status": "ok",
-                "node": {
-                    "kind": node["kind"], "name": node["name"],
-                    "file": node["path"], "line": node["line_start"],
-                    "signature": node.get("signature"),
-                },
-                "edges": _simplify_edges(edges),
-            }
+            return formatter.format_node_detail(node, edges)
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_definition(name: str) -> dict[str, Any]:
+    def xcodegraph_definition(name: str) -> str:
         """Get the file and line location where a symbol is defined."""
         s = _storage()
         try:
             node = s.get_node(name)
             if not node:
-                return {"status": "not_found", "name": name}
-            return {
-                "status": "ok", "kind": node["kind"], "name": node["name"],
-                "file": node["path"], "line": node["line_start"],
-            }
+                return f"## {name}\n\nNot found.\n"
+            return formatter.format_definition(node)
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_file_symbols(file_path: str) -> dict[str, Any]:
+    def xcodegraph_file_symbols(file_path: str) -> str:
         """List all code symbols found in a given source file."""
         s = _storage()
         try:
             symbols = s.get_file_symbols(file_path)
-            return {
-                "status": "ok", "count": len(symbols),
-                "symbols": [
-                    {"kind": sym["kind"], "name": sym["name"], "line": sym["line_start"]}
-                    for sym in symbols
-                ],
-            }
+            return formatter.format_file_symbols(symbols, file_path)
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_hierarchy(name: str, depth: int = 10) -> dict[str, Any]:
-        """Build the module/instance hierarchy tree from a top module. Depth controls nesting level (default 10)."""
+    def xcodegraph_hierarchy(name: str, depth: int = 10) -> str:
+        """Build the module/instance hierarchy tree from a top module."""
         s = _storage()
         try:
             hierarchy = s.get_hierarchy(name, depth)
-            return {
-                "status": "ok", "count": len(hierarchy),
-                "hierarchy": [
-                    {"kind": h["kind"], "name": h["name"], "depth": h["depth"], "file": h.get("path")}
-                    for h in hierarchy
-                ],
-            }
+            return formatter.format_hierarchy(hierarchy, name)
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_instantiated_by(name: str) -> dict[str, Any]:
+    def xcodegraph_instantiated_by(name: str) -> str:
         """Find all modules that instantiate the given module or interface."""
         s = _storage()
         try:
-            result = s.get_instantiated_by(name)
-            return {
-                "status": "ok", "count": len(result),
-                "instantiated_by": [
-                    {"kind": r["kind"], "name": r["name"], "file": r.get("path"), "line": r.get("line_start")}
-                    for r in result
-                ],
-            }
+            results = s.get_instantiated_by(name)
+            return formatter.format_instantiated_by(results, name)
         finally:
             s.close()
 
     @mcp.tool()
-    def xcodegraph_imports(name: str) -> dict[str, Any]:
+    def xcodegraph_imports(name: str) -> str:
         """List packages imported by the given node."""
-        return _edge_query(name, "IMPORTS")
+        return _edge_tool(name, "IMPORTS")
 
     @mcp.tool()
-    def xcodegraph_includes(name: str) -> dict[str, Any]:
+    def xcodegraph_includes(name: str) -> str:
         """List files included by the given file via `include."""
-        return _edge_query(name, "INCLUDES")
+        return _edge_tool(name, "INCLUDES")
 
     @mcp.tool()
-    def xcodegraph_extends(name: str) -> dict[str, Any]:
+    def xcodegraph_extends(name: str) -> str:
         """List base classes extended by the given class."""
-        return _edge_query(name, "EXTENDS")
+        return _edge_tool(name, "EXTENDS")
 
     @mcp.tool()
-    def xcodegraph_reindex_file(file_path: str) -> dict[str, Any]:
-        """Re-index a single file after modification. The file must be part of an already-indexed project."""
+    def xcodegraph_reindex_file(file_path: str) -> str:
+        """Re-index a single file after modification."""
         from xcodegraph.core.parser import SVParser
         s = _storage()
         try:
             if not os.path.exists(file_path):
-                return {"status": "error", "reason": f"File not found: {file_path}"}
+                return f"## Reindex\n\nError: file not found: {file_path}\n"
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 source = f.read()
             file_rec = s.upsert_file(file_path, source.encode("utf-8"))
             parser = SVParser()
             result = parser.extract(file_path, source)
             count = s.store_extraction(file_rec, result)
-            return {"status": "ok", "file": file_path, "nodes_added": count}
+            return formatter.format_reindex_result({"nodes_added": count})
         finally:
             s.close()
 
-    # ── edge query helper ──────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────────
 
-    def _edge_query(name: str, kind: str) -> dict[str, Any]:
+    def _edge_tool(name: str, kind: str) -> str:
         s = _storage()
         try:
             results = s.get_edges_by_kind(name, kind)
-            return {
-                "status": "ok", "count": len(results), "kind": kind,
-                "results": [
-                    {"dst_name": r.get("dst_name", ""), "file": r.get("path"), "line": r.get("line")}
-                    for r in results
-                ],
-            }
+            return formatter.format_edge_list(results, kind, name)
         finally:
             s.close()
 
     return mcp
-
-
-def _simplify_edges(edges: dict[str, list[dict]]) -> list[dict]:
-    """Simplify edge output for MCP responses."""
-    result = []
-    for kind, items in edges.items():
-        for item in items:
-            result.append({
-                "kind": kind,
-                "src_name": item.get("src_name", ""),
-                "dst_name": item.get("dst_name", ""),
-            })
-    return result
