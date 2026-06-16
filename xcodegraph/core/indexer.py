@@ -51,8 +51,8 @@ class Indexer:
                     continue  # xcg.md: .svh/.vh in filelist → warning, skip
 
                 try:
+                    expanded = None
                     if source_manager:
-                        # Build expanded compilation unit
                         expanded = source_manager.build_compilation_unit(src_path)
                         if expanded.diagnostics:
                             for d in expanded.diagnostics:
@@ -71,6 +71,13 @@ class Indexer:
                     total_nodes += len(result.nodes)
                     indexed_files += 1
                     errors.extend(result.errors)
+
+                    # xcg.md #6: store CU metadata (source_segments, include_edges, conditionals)
+                    if source_manager and expanded:
+                        try:
+                            self._store_cu_metadata(file_rec.id or 0, src_path, expanded)
+                        except Exception as e2:
+                            errors.append(f"{src_path} CU metadata: {e2}")
                 except Exception as e:
                     errors.append(f"{src_path}: {e}")
 
@@ -134,6 +141,49 @@ class Indexer:
     def _is_header(path: str) -> bool:
         ext = os.path.splitext(path)[1].lower()
         return ext in (".svh", ".vh")
+
+    def _store_cu_metadata(self, file_id: int, root_path: str, expanded) -> None:
+        """xcg.md #6: store compilation_unit, source_segments, include_edges, conditionals."""
+        import hashlib, json
+
+        # compilation_unit
+        expanded_hash = hashlib.sha256(expanded.source_text.encode()).hexdigest()
+        cur = self.storage.conn.execute(
+            """INSERT INTO compilation_units (root_file_id, root_file_path, source_hash, expanded_hash, created_at, updated_at)
+               VALUES (?,?,?,?,datetime('now'),datetime('now'))""",
+            (file_id, root_path, "", expanded_hash),
+        )
+        cu_id = cur.lastrowid
+
+        # source_segments
+        for seg in expanded.source_map.segments:
+            self.storage.conn.execute(
+                """INSERT INTO source_segments (cu_id, virtual_start, virtual_end, origin_file_id, origin_file_path, origin_start, origin_end, include_stack_json)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (cu_id, seg.virtual_start, seg.virtual_end, 0, seg.origin_file,
+                 seg.origin_start, seg.origin_end, json.dumps(seg.include_stack)),
+            )
+
+        # include_edges
+        for ie in expanded.include_edges:
+            self.storage.conn.execute(
+                """INSERT INTO include_edges (cu_id, from_file_id, from_file_path, to_file_id, to_file_path, include_line, include_text, resolved, condition)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (cu_id, file_id, ie.from_file, 0, ie.to_file or "",
+                 ie.include_line, ie.include_text, 1 if ie.resolved else 0, ie.condition),
+            )
+
+        # conditionals
+        for cb in expanded.conditionals:
+            self.storage.conn.execute(
+                """INSERT INTO conditionals (cu_id, file_id, file_path, line_start, line_end, directive, condition, active, active_branch_json, inactive_branch_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (cu_id, file_id, cb.file, cb.line_start, cb.line_end,
+                 cb.directive, cb.condition, 1 if cb.active else 0,
+                 json.dumps(cb.active_branch_files), json.dumps(cb.inactive_branch_files)),
+            )
+
+        self.storage.conn.commit()
 
     def close(self) -> None:
         self.storage.close()

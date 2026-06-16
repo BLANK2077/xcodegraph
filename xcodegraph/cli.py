@@ -89,6 +89,12 @@ def main() -> None:
     p = sub.add_parser("clean", help="Remove the index database")
     p.add_argument("--db", default=DB_DEFAULT)
 
+    p = sub.add_parser("benchmark", help="Benchmark indexing performance")
+    p.add_argument("--filelist", "-f", help="VCS .f filelist path")
+    p.add_argument("--root", "-r", help="Root directory to scan")
+    p.add_argument("--db", default=DB_DEFAULT)
+    p.add_argument("--expand", action="store_true", help="Enable include expansion")
+
     args = parser.parse_args()
     dispatch(args)
 
@@ -102,6 +108,7 @@ def dispatch(args: argparse.Namespace) -> None:
         "includes": lambda a: cmd_edge_query(a, "INCLUDES"),
         "extends": lambda a: cmd_edge_query(a, "EXTENDS"),
         "reindex": cmd_reindex, "summary": cmd_summary, "clean": cmd_clean,
+        "benchmark": cmd_benchmark,
     }
     fn = cmd_map.get(args.command)
     if fn:
@@ -260,6 +267,55 @@ def cmd_summary(args: argparse.Namespace) -> None:
     try:
         print(formatter.format_summary(generate_summary(s, args.name)))
     finally: s.close()
+
+
+def cmd_benchmark(args: argparse.Namespace) -> None:
+    """xcg.md Section 15: Benchmark indexing and query performance."""
+    import time, os
+    db_path = os.path.abspath(args.db)
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    t0 = time.time()
+    idx = Indexer(db_path)
+
+    if args.filelist:
+        result = idx.index_filelist(args.filelist, expand_includes=args.expand)
+    elif args.root:
+        result = idx.index_directory(args.root)
+    else:
+        print("Specify --filelist or --root", file=sys.stderr); sys.exit(1)
+
+    idx.close()
+    t1 = time.time()
+
+    s = Storage(db_path)
+    stats = s.stats()
+    t2 = time.time()
+    # quick search latency
+    _ = s.search_nodes("module")
+    t3 = time.time()
+
+    print(f"files_total:        {result.get('indexed_files', '?')}")
+    print(f"nodes_total:        {stats['node_count']}")
+    print(f"edges_total:        {stats['edge_count']}")
+    print(f"unresolved_refs:    {stats['unresolved_ref_count']}")
+    print(f"index_time_sec:     {t1 - t0:.2f}")
+    print(f"search_latency_ms:  {(t3 - t2) * 1000:.0f}")
+    db_size = os.path.getsize(db_path) / 1024 / 1024 if os.path.exists(db_path) else 0
+    print(f"db_size_mb:         {db_size:.1f}")
+
+    cu_count = s.conn.execute("SELECT COUNT(*) FROM compilation_units").fetchone()[0]
+    cond_count = s.conn.execute("SELECT COUNT(*) FROM conditionals").fetchone()[0]
+    ie_count = s.conn.execute("SELECT COUNT(*) FROM include_edges").fetchone()[0]
+    print(f"compilation_units:  {cu_count}")
+    print(f"conditionals:       {cond_count}")
+    print(f"include_edges:      {ie_count}")
+
+    if result.get("errors"):
+        print(f"parse_errors:       {len(result['errors'])}")
+    s.close()
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
