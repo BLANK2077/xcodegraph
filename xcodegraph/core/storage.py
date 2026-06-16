@@ -232,18 +232,18 @@ class Storage:
                 result.setdefault(kind, [])
                 result[kind].append(d)
 
-        # Unresolved refs — lightweight same-file resolve
-        file_id = node.get("file_id")
-        if file_id:
-            refs = self.conn.execute(
-                "SELECT kind, name, line FROM unresolved_refs WHERE file_id = ?",
-                (file_id,),
-            ).fetchall()
-            for r in refs:
-                d = dict(r)
-                kind = d["kind"]
-                result.setdefault(kind, [])
-                result[kind].append(d)
+        # Unresolved refs — filter by context_node_id (belongs to THIS node)
+        refs = self.conn.execute(
+            "SELECT kind, name, line FROM unresolved_refs WHERE context_node_id = ?",
+            (node_id,),
+        ).fetchall()
+        for r in refs:
+            d = dict(r)
+            kind = d["kind"]
+            d["src_name"] = node["name"]
+            d["dst_name"] = d["name"]  # unresolved_refs.name is the target
+            result.setdefault(kind, [])
+            result[kind].append(d)
 
         return result
 
