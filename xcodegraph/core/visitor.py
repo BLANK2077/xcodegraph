@@ -88,6 +88,7 @@ class ExtractionContext:
         self.unresolved_refs: list[UnresolvedRef] = []
         self.errors: list[str] = []
         self.warnings: list[str] = []
+        self.var_type_map: dict[str, str] = {}  # variable_name → type_name
 
     # scope stack
     def push_scope(self, node_id: str) -> None:
@@ -249,6 +250,16 @@ class SVEVisitor:
         # ── include ──
         if ntype == "include_compiler_directive":
             return self._include_directive(node, ctx)
+
+        # ── hierarchical_identifier: resolve field access → TypeName.field ──
+        if ntype == "hierarchical_identifier":
+            segments = [_clean(ts_node_text(c)) for c in node.named_children
+                       if c.type == "simple_identifier"]
+            if len(segments) >= 2 and segments[0] in ctx.var_type_map:
+                type_name = ctx.var_type_map[segments[0]]
+                qualified = f"{type_name}.{'.'.join(segments[1:])}"
+                ctx.add_reference(qualified, "REFERENCES", node)
+                return True
 
         # ── variable declarations (rand fields, TLM ports, virtual if) ──
         if ntype == "data_declaration":
@@ -466,11 +477,19 @@ class SVEVisitor:
     def _call(self, node: TSNode, ctx: ExtractionContext) -> bool:
         name = self._tf_call_name(node)
         if name:
-            # detect factory create: type_id::create("name", ...)
+            # Resolve receiver → ClassName.methodName (both tf_call and method_call)
+            receiver = self._extract_receiver_name(node)
+            if not receiver and "." in name:
+                # tf_call with hierarchical_identifier: "drv.run_phase" → receiver="drv"
+                receiver = name.split(".")[0]
+            if receiver and receiver in ctx.var_type_map:
+                type_name = ctx.var_type_map[receiver]
+                method = name.split(".")[-1] if "." in name else name
+                name = f"{type_name}.{method}"
+
             full = ts_node_text(node)
             if "type_id::create" in full or "type_id::create" in full:
                 ctx.add_reference(name, "INSTANTIATES", node)
-            # detect config_db
             elif "config_db" in full:
                 ctx.create_node("config_db_call", name, node, signature=_first_line(node))
                 ctx.add_reference(name, "CALLS", node)
@@ -613,6 +632,7 @@ class SVEVisitor:
         # TLM port detection
         for port_type in TLM_PORT_TYPES:
             if port_type in text:
+                self._map_var_type(node, ctx)
                 for child in node.named_children:
                     if child.type == "list_of_variable_decl_assignments":
                         for v in child.named_children:
@@ -625,6 +645,7 @@ class SVEVisitor:
 
         # virtual interface detection → REFERENCES
         if "virtual" in text:
+            self._map_var_type(node, ctx)
             # Recursively search for interface/simple identifier in data type subtree
             def _find_type_name(n: TSNode) -> str | None:
                 if n.type in ("interface_identifier", "simple_identifier",
@@ -648,9 +669,64 @@ class SVEVisitor:
                     ref_name = _clean(ts_node_text(gc).split("::")[-1])
                     if ref_name:
                         ctx.add_reference(ref_name, "REFERENCES", node)
+                        self._map_var_type(node, ctx)
                         return True
 
+        # generic var→type mapping for qualified call resolution
+        self._map_var_type(node, ctx)
+        # Also create REFERENCES for the type itself
+        type_name = self._extract_type_name(node)
+        if type_name:
+            ctx.add_reference(type_name, "REFERENCES", node)
         return False
+
+    # ── var→type mapping ────────────────────────────────────────────────
+
+    def _map_var_type(self, node: TSNode, ctx: ExtractionContext) -> None:
+        """Extract (var_name, type_name) from a data_declaration and store in ctx.var_type_map."""
+        type_name = self._extract_type_name(node)
+        if not type_name:
+            return
+        for child in node.named_children:
+            if child.type == "list_of_variable_decl_assignments":
+                for v in child.named_children:
+                    if v.type == "variable_decl_assignment":
+                        var_name = _child_text(v, "name") or (
+                            _clean(ts_node_text(v.named_children[0])) if v.named_children else None
+                        )
+                        if var_name:
+                            ctx.var_type_map[_clean(var_name)] = type_name
+
+    @staticmethod
+    def _extract_type_name(node: TSNode) -> str | None:
+        """Extract the type name from a data_declaration's data_type subtree."""
+        for child in node.named_children:
+            if child.type == "data_type_or_implicit":
+                for dt in child.named_children:
+                    if dt.type in ("data_type", "class_type", "interface_type", "interface_class_type"):
+                        for id_node in dt.named_children:
+                            if id_node.type in ("simple_identifier", "interface_identifier",
+                                                "class_identifier", "hierarchical_identifier",
+                                                "class_type", "interface_class_type",
+                                                "package_scope"):
+                                text = _clean(ts_node_text(id_node))
+                                # Strip #(parameters) if present (e.g. "uvm_analysis_port #(item)")
+                                import re
+                                text = re.sub(r'\s*#\s*\(.*', '', text) if text else None
+                                return text.split("::")[-1] if text else None
+        return None
+
+    @staticmethod
+    def _extract_receiver_name(node: TSNode) -> str | None:
+        """Extract receiver variable name from a method_call AST node."""
+        nc = node.named_children
+        if nc and nc[0].type == "primary":
+            for child in nc[0].named_children:
+                if child.type == "hierarchical_identifier":
+                    for id_node in child.named_children:
+                        if id_node.type == "simple_identifier":
+                            return _clean(ts_node_text(id_node))
+        return None
 
     # ── helpers ─────────────────────────────────────────────────────────
 
