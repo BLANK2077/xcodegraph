@@ -241,9 +241,9 @@ class SVEVisitor:
         # ── verification: coverage ──
         if ntype == "covergroup_declaration":
             return self._scope(node, ctx, "covergroup")
-        if ntype == "coverpoint":
+        if ntype == "cover_point":
             return self._named_decl(node, ctx, "coverpoint")
-        if ntype == "cross":
+        if ntype == "cover_cross":
             return self._cross(node, ctx)
 
         # ── variable declarations (rand fields, TLM ports, virtual if) ──
@@ -547,42 +547,57 @@ class SVEVisitor:
 
     def _data_decl(self, node: TSNode, ctx: ExtractionContext) -> bool:
         text = ts_node_text(node).lower()
+        parent = node.parent
+
+        # Check if parent node has random_qualifier (rand/randc)
+        has_rand = False
+        if parent:
+            for pc in parent.named_children:
+                if pc.type == "random_qualifier":
+                    has_rand = True
+                    break
+
+        # rand / randc field detection
+        if has_rand:
+            for child in node.named_children:
+                if child.type == "list_of_variable_decl_assignments":
+                    for v in child.named_children:
+                        if v.type == "variable_decl_assignment":
+                            var_name = _child_text(v, "name") or (_clean(ts_node_text(v.named_children[0])) if v.named_children else "")
+                            if var_name:
+                                ctx.create_node("rand_field", _clean(var_name), v,
+                                                signature=_first_line(parent or node))
+            return True
 
         # TLM port detection
         for port_type in TLM_PORT_TYPES:
             if port_type in text:
-                # extract variable name
                 for child in node.named_children:
                     if child.type == "list_of_variable_decl_assignments":
                         for v in child.named_children:
                             if v.type == "variable_decl_assignment":
-                                var_name = _child_text(v, "name") or _clean(ts_node_text(v.named_children[0]) if v.named_children else "")
+                                var_name = _child_text(v, "name") or (_clean(ts_node_text(v.named_children[0])) if v.named_children else "")
                                 if var_name:
                                     ctx.create_node("tlminitf", _clean(var_name), v,
                                                     signature=_first_line(node))
                 return True
 
-        # rand / randc field detection
-        if text.startswith("rand ") or text.startswith("randc "):
-            for child in node.named_children:
-                if child.type == "list_of_variable_decl_assignments":
-                    for v in child.named_children:
-                        if v.type == "variable_decl_assignment":
-                            var_name = _child_text(v, "name") or _clean(ts_node_text(v.named_children[0]) if v.named_children else "")
-                            if var_name:
-                                ctx.create_node("rand_field", _clean(var_name), v,
-                                                signature=_first_line(node))
-            return True
-
         # virtual interface detection → REFERENCES
         if "virtual" in text:
-            for child in node.named_children:
-                for gc in child.named_children:
-                    if gc.type in ("interface_identifier", "simple_identifier",
-                                   "class_type", "hierarchical_identifier"):
-                        ref_name = _clean(ts_node_text(gc))
-                        if ref_name:
-                            ctx.add_reference(ref_name, "REFERENCES", node)
+            # Recursively search for interface/simple identifier in data type subtree
+            def _find_type_name(n: TSNode) -> str | None:
+                if n.type in ("interface_identifier", "simple_identifier",
+                              "class_type", "hierarchical_identifier"):
+                    return _clean(ts_node_text(n))
+                for c in n.named_children:
+                    result = _find_type_name(c)
+                    if result:
+                        return result
+                return None
+
+            ref_name = _find_type_name(node)
+            if ref_name:
+                ctx.add_reference(ref_name, "REFERENCES", node)
             return True
 
         # general class-type reference detection for HAS_A
