@@ -516,17 +516,24 @@ class SVEVisitor:
         return True
 
     def _assertion(self, node: TSNode, ctx: ExtractionContext, kind: str) -> bool:
-        created = ctx.create_node(kind, f"_{kind}_{node.start_point[0]+1}", node,
+        # Check for a label (first named child = simple_identifier like PSEL_STABLE:)
+        label = None
+        nc = node.named_children
+        if nc and nc[0].type == "simple_identifier":
+            label = _clean(ts_node_text(nc[0]))
+        name = label or f"_{kind}_{node.start_point[0]+1}"
+
+        created = ctx.create_node(kind, name, node,
                                   signature=_first_line(node))
         if not created:
             return True
 
-        # try to find referenced property/sequence name
+        # REFERENCE edge to the property/sequence being used
         for child in node.named_children:
             if child.type in ("property_identifier", "sequence_identifier",
-                              "simple_identifier", "hierarchical_identifier"):
-                ref_name = _clean(ts_node_text(child))
-                if ref_name:
+                              "hierarchical_identifier"):
+                ref_name = _clean(ts_node_text(child).split("::")[-1])
+                if ref_name and ref_name != label:  # don't self-reference the label
                     ctx.add_reference(ref_name, "DECLARES", child, created.id)
                     break
         return True
