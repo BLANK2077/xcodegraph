@@ -1,0 +1,104 @@
+"""Indexer — orchestrates filelist expansion + parsing + storage."""
+
+from __future__ import annotations
+
+import os
+import time
+
+from .filelist import FilelistParser, FilelistResult
+from .parser import SVParser
+from .storage import Storage
+
+
+class Indexer:
+    """Top-level indexing pipeline."""
+
+    def __init__(self, db_path: str):
+        self.storage = Storage(db_path)
+        self.parser = SVParser()
+        self.filelist_parser = FilelistParser()
+
+    # ── index entry points ──────────────────────────────────────────────
+
+    def index_filelist(self, filelist_path: str, defines: dict[str, str] | None = None) -> dict:
+        """Expand a filelist and index all source files."""
+        if defines:
+            self.filelist_parser = FilelistParser(defines)
+
+        fl_result = self.filelist_parser.parse(filelist_path)
+
+        t0 = time.time()
+        total_nodes = 0
+        indexed_files = 0
+        errors: list[str] = []
+
+        for src_path in fl_result.files:
+            if self._is_sv_file(src_path):
+                try:
+                    with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                        source = f.read()
+                    file_rec = self.storage.upsert_file(src_path, source.encode("utf-8"))
+                    result = self.parser.extract(src_path, source)
+                    self.storage.store_extraction(file_rec, result)
+                    total_nodes += len(result.nodes)
+                    indexed_files += 1
+                    errors.extend(result.errors)
+                except Exception as e:
+                    errors.append(f"{src_path}: {e}")
+
+        # Save meta
+        self.storage.set_meta("filelist_path", filelist_path)
+        self.storage.set_meta("filelist_hash", "")
+        self.storage.set_meta("created_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+        self.storage.set_meta("updated_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+        self.storage.set_meta("backend", "tree-sitter")
+        self.storage.set_meta("schema_version", "1")
+
+        return {
+            "indexed_files": indexed_files,
+            "total_nodes": total_nodes,
+            "errors": errors,
+            "incdirs": fl_result.incdirs,
+            "defines": fl_result.defines,
+            "duration_ms": (time.time() - t0) * 1000,
+        }
+
+    def index_directory(self, root_dir: str) -> dict:
+        """Scan a directory recursively and index all SV files."""
+        t0 = time.time()
+        total_nodes = 0
+        indexed_files = 0
+        errors: list[str] = []
+
+        for dirpath, _dirs, filenames in os.walk(root_dir):
+            for fn in filenames:
+                if self._is_sv_file(fn):
+                    src_path = os.path.join(dirpath, fn)
+                    try:
+                        with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                            source = f.read()
+                        file_rec = self.storage.upsert_file(src_path, source.encode("utf-8"))
+                        result = self.parser.extract(src_path, source)
+                        self.storage.store_extraction(file_rec, result)
+                        total_nodes += len(result.nodes)
+                        indexed_files += 1
+                        errors.extend(result.errors)
+                    except Exception as e:
+                        errors.append(f"{src_path}: {e}")
+
+        self.storage.set_meta("updated_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+
+        return {
+            "indexed_files": indexed_files,
+            "total_nodes": total_nodes,
+            "errors": errors,
+            "duration_ms": (time.time() - t0) * 1000,
+        }
+
+    @staticmethod
+    def _is_sv_file(path: str) -> bool:
+        ext = os.path.splitext(path)[1].lower()
+        return ext in (".sv", ".svh", ".v", ".vh", ".sva")
+
+    def close(self) -> None:
+        self.storage.close()

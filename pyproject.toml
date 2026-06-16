@@ -1,0 +1,16 @@
+[project]
+name = "xcodegraph"
+version = "0.1.0"
+description = "Python SystemVerilog Code Intelligence — offline structural indexer for verification agents"
+requires-python = ">=3.10"
+dependencies = [
+    "tree-sitter>=0.25",
+    "tree-sitter-systemverilog>=0.3",
+]
+
+[project.scripts]
+xcodegraph = "xcodegraph.cli:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
