@@ -246,6 +246,10 @@ class SVEVisitor:
         if ntype == "cover_cross":
             return self._cross(node, ctx)
 
+        # ── include ──
+        if ntype == "include_compiler_directive":
+            return self._include_directive(node, ctx)
+
         # ── variable declarations (rand fields, TLM ports, virtual if) ──
         if ntype == "data_declaration":
             return self._data_decl(node, ctx)
@@ -554,6 +558,19 @@ class SVEVisitor:
                 cp_name = _clean(ts_node_text(child))
                 if cp_name:
                     ctx.add_reference(cp_name, "CROSSES", child, created.id)
+        return True
+
+    # ── include ─────────────────────────────────────────────────────────
+
+    def _include_directive(self, node: TSNode, ctx: ExtractionContext) -> bool:
+        """Track `include "file.svh"."""
+        text = ts_node_text(node)
+        # Extract filename from `include "path/to/file.svh"
+        import re
+        m = re.search(r'"([^"]+)"', text)
+        if m:
+            filename = m.group(1)
+            ctx.add_reference(filename, "INCLUDES", node)
         return True
 
     # ── data declarations (rand fields, TLM ports, virtual if) ──────────
