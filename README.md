@@ -26,6 +26,18 @@ xcodegraph search ADDR_WIDTH        # 搜索参数/信号/模块
 - **离线友好** — 下载 wheel 文件后用 `pip install --no-index *.whl` 即可部署
 - **仅支持 SystemVerilog** — 不做多语言，专注 SV/RTL 代码结构，代码量控制在 ~2000 行
 
+## 架构来源
+
+XCodeGraph 的总体架构（提取器 → 存储 → 引用解析 → 搜索 → MCP Server 的分层设计）学习自原版 [CodeGraph](https://github.com/colbymchenry/codegraph)，一个优秀的本地优先代码知识图谱项目。我们借鉴了它的：
+
+- `NodeKind`/`EdgeKind` 类型体系
+- `ExtractionContext` 作用域栈 + `createNode`/`addUnresolvedReference` 的提取上下文模式
+- `LanguageExtractor` 接口 + `visitNode` 钩子的自定义 visitor 设计
+- SQLite FTS5 存储 schema 和增量索引策略
+- MCP Server 工具设计（`search` / `explore` / `node` 等）
+
+在此基础上，XCodeGraph 针对芯片验证场景做了适配：用 Python 替代 Node.js、增加 VCS filelist 支持、移除多语言泛化逻辑、使用 `py-tree-sitter` 替代 `web-tree-sitter`。
+
 ## 快速开始
 
 ```
