@@ -58,6 +58,10 @@ def main() -> None:
     p.add_argument("--db", default=DB_DEFAULT)
     p.add_argument("--json", action="store_true")
 
+    # serve
+    p = sub.add_parser("serve", help="Start MCP server (stdio transport)")
+    p.add_argument("--db", default=DB_DEFAULT)
+
     # clean
     p = sub.add_parser("clean", help="Remove the index database")
     p.add_argument("--db", default=DB_DEFAULT)
@@ -81,6 +85,8 @@ def dispatch(args: argparse.Namespace) -> None:
         cmd_definition(args)
     elif cmd == "file-symbols":
         cmd_file_symbols(args)
+    elif cmd == "serve":
+        cmd_serve(args)
     elif cmd == "clean":
         cmd_clean(args)
     else:
@@ -190,6 +196,14 @@ def cmd_file_symbols(args: argparse.Namespace) -> None:
         for s in symbols:
             print(f"{s['kind']:16s} {s['name']:40s} line {s['line_start']}")
     storage.close()
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Start MCP server using official MCP SDK (stdio transport)."""
+    db_path = os.path.abspath(args.db)
+    from xcodegraph.mcp_server import create_server
+    mcp = create_server(db_path)
+    mcp.run(transport="stdio")
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
