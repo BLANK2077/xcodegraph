@@ -46,13 +46,85 @@ xcodegraph index my_project/ --filelist my_project/rtl.f
 xcodegraph search ADDR_WIDTH
 ```
 
+## AI 集成 (MCP Server)
+
+XCodeGraph 提供 MCP Server，可接入 Claude Code、Codex CLI 等 AI 工具。
+
+### 启动 MCP Server
+
+```bash
+# stdio 传输 (AI 工具直接调用)
+xcodegraph serve --db .xcodegraph/index.sqlite
+```
+
+### 配置 Claude Code
+
+在**项目根目录**创建 `.mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "xcodegraph": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "xcodegraph.cli", "serve", "--db", ".xcodegraph/index.sqlite"]
+    }
+  }
+}
+```
+
+或通过 Claude Code CLI 添加：
+
+```bash
+claude mcp add --scope project xcodegraph -- python -m xcodegraph.cli serve --db .xcodegraph/index.sqlite
+```
+
+**全局配置** (所有项目可用): 编辑 `~/.claude.json`，插入相同的 `mcpServers` 块。
+
+### 配置 Codex CLI
+
+编辑 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.xcodegraph]
+command = "python"
+args = ["-m", "xcodegraph.cli", "serve", "--db", "/absolute/path/to/.xcodegraph/index.sqlite"]
+```
+
+> **注意**: TOML 格式中路径必须使用绝对路径。Codex 不支持 `~` 展开，请使用完整路径如 `/home/user/project/.xcodegraph/index.sqlite`。
+
+### 验证连接
+
+在 Claude Code 中输入 `/mcp` 查看已连接的 MCP server，或直接调用：
+
+```
+xcodegraph_status()
+```
+
+如果返回索引统计信息，说明连接成功。
+
+### MCP 工具清单
+
+| 工具 | 用途 |
+|------|------|
+| `xcodegraph_search` | 搜索符号 |
+| `xcodegraph_node` | 符号详情 + 关系 |
+| `xcodegraph_definition` | 跳转定义 |
+| `xcodegraph_file_symbols` | 文件符号列表 |
+| `xcodegraph_hierarchy` | 模块层次树 |
+| `xcodegraph_instantiated_by` | 反向实例化 |
+| `xcodegraph_extends` | 类继承链 |
+| `xcodegraph_imports` | Package 导入 |
+| `xcodegraph_includes` | `` `include `` 追踪 |
+| `xcodegraph_status` | 索引状态 |
+| `xcodegraph_reindex_file` | 单文件重索引 |
+
+详见 [AI 使用指南](skill/xcodegraph-sv-skill.md)。
+
 ## 文档
 
-- [项目总览与架构](doc/00-overview.md)
-- [阶段 1: 核心提取器](doc/01-core-extraction.md)
-- [阶段 2: Filelist 解析器](doc/02-filelist-parser.md)
-- [阶段 3: 存储与搜索](doc/03-storage-search.md)
-- [阶段 4: 引用解析与文件监听](doc/04-resolution-watcher.md)
-- [阶段 5: MCP Server](doc/05-mcp-server.md)
-- [阶段 6: CLI、测试与发布](doc/06-cli-test-release.md)
+- [AI 使用指南](skill/xcodegraph-sv-skill.md) ⭐
+- [OpenTitan Benchmark 报告](doc/opentitan-results.md)
+- [OpenTitan 实时输出](doc/opentitan-live-output.md)
+- [修正开发计划](doc/01-revised-plan.md)
 - [可行性报告](doc/py-codegraph-sv-feasibility.md)
