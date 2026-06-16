@@ -295,18 +295,17 @@ class Storage:
                 (current["id"],),
             ).fetchall()
 
-            # Also check unresolved refs for INSTANTIATES
-            current_file_id = current.get("file_id")
+            # Also check unresolved refs for INSTANTIATES (xcg.md Step 6: bind by context_node_id)
+            current_node_id = current.get("id")
             ref_rows = self.conn.execute(
                 """SELECT n.*, f.path
                    FROM unresolved_refs ur
                    JOIN nodes n ON ur.name = n.name
                    JOIN files f ON n.file_id = f.id
                    WHERE ur.kind = 'INSTANTIATES'
-                     AND ur.file_id = ?
-                     AND ur.context_node_id IS NOT NULL""",
-                (current_file_id,),
-            ).fetchall() if current_file_id else []
+                     AND ur.context_node_id = ?""",
+                (current_node_id,),
+            ).fetchall()
 
             all_rows = {}
             for row in edge_rows:

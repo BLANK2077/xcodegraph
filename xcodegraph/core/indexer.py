@@ -7,6 +7,7 @@ import time
 
 from .filelist import FilelistParser, FilelistResult
 from .parser import SVParser
+from .source_manager import SourceManager
 from .storage import Storage
 
 
@@ -20,7 +21,8 @@ class Indexer:
 
     # ── index entry points ──────────────────────────────────────────────
 
-    def index_filelist(self, filelist_path: str, defines: dict[str, str] | None = None) -> dict:
+    def index_filelist(self, filelist_path: str, defines: dict[str, str] | None = None,
+                       expand_includes: bool = False) -> dict:
         """Expand a filelist and index all source files."""
         if defines:
             self.filelist_parser = FilelistParser(defines)
@@ -33,16 +35,38 @@ class Indexer:
         errors: list[str] = []
 
         # xcg.md Step 2: +incdir+ is only include search path, NOT source list.
-        # Only filelist-explicit source files get indexed.
         all_files = list(fl_result.files)
+
+        # xcg.md Step 3-5: Include-aware compilation unit expansion
+        source_manager = None
+        if expand_includes:
+            source_manager = SourceManager(
+                incdirs=fl_result.incdirs,
+                defines=fl_result.defines,
+            )
 
         for src_path in all_files:
             if self._is_sv_file(src_path):
+                if self._is_header(src_path) and not expand_includes:
+                    continue  # xcg.md: .svh/.vh in filelist → warning, skip
+
                 try:
-                    with open(src_path, "r", encoding="utf-8", errors="replace") as f:
-                        source = f.read()
-                    file_rec = self.storage.upsert_file(src_path, source.encode("utf-8"))
-                    result = self.parser.extract(src_path, source)
+                    if source_manager:
+                        # Build expanded compilation unit
+                        expanded = source_manager.build_compilation_unit(src_path)
+                        if expanded.diagnostics:
+                            for d in expanded.diagnostics:
+                                if d.severity == "error":
+                                    errors.append(f"{src_path}: {d.message}")
+                        source = expanded.source_text
+                        file_rec = self.storage.upsert_file(src_path, source.encode("utf-8"))
+                        result = self.parser.extract(src_path, source)
+                    else:
+                        with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                            source = f.read()
+                        file_rec = self.storage.upsert_file(src_path, source.encode("utf-8"))
+                        result = self.parser.extract(src_path, source)
+
                     self.storage.store_extraction(file_rec, result)
                     total_nodes += len(result.nodes)
                     indexed_files += 1
@@ -105,6 +129,11 @@ class Indexer:
     def _is_sv_file(path: str) -> bool:
         ext = os.path.splitext(path)[1].lower()
         return ext in (".sv", ".svh", ".v", ".vh", ".sva")
+
+    @staticmethod
+    def _is_header(path: str) -> bool:
+        ext = os.path.splitext(path)[1].lower()
+        return ext in (".svh", ".vh")
 
     def close(self) -> None:
         self.storage.close()
