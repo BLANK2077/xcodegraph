@@ -385,6 +385,29 @@ class Storage:
             "unresolved_ref_count": self.conn.execute("SELECT COUNT(*) FROM unresolved_refs").fetchone()[0],
         }
 
+    # ── conditionals (xcg.md Section 9.4) ─────────────────────────────
+
+    def get_conditionals(self, file_path: str) -> list[dict]:
+        """Get conditional blocks for a file."""
+        file_id = self.conn.execute(
+            "SELECT id FROM files WHERE path = ?", (file_path,),
+        ).fetchone()
+        if not file_id:
+            return []
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM conditionals WHERE file_id = ? ORDER BY line_start",
+            (file_id["id"],),
+        ).fetchall()]
+
+    def get_include_edges(self, file_path: str) -> list[dict]:
+        """Get include edges for a file (as includer or included)."""
+        return [dict(r) for r in self.conn.execute(
+            """SELECT * FROM include_edges
+               WHERE from_file_path = ? OR to_file_path = ?
+               ORDER BY include_line""",
+            (file_path, file_path),
+        ).fetchall()]
+
     def close(self) -> None:
         self.conn.close()
 

@@ -138,6 +138,16 @@ Best practices:
         return _edge_tool(name, "EXTENDS")
 
     @mcp.tool()
+    def xcodegraph_conditionals(file_path: str) -> str:
+        """Show conditional compilation blocks (ifdef/ifndef) for a file."""
+        s = _storage()
+        try:
+            conditionals = s.get_conditionals(file_path)
+            return formatter.format_conditionals(conditionals, file_path)
+        finally:
+            s.close()
+
+    @mcp.tool()
     def xcodegraph_reindex_file(file_path: str) -> str:
         """Re-index a single file after modification."""
         from xcodegraph.core.parser import SVParser

@@ -112,3 +112,68 @@ CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE ON nodes BEGIN
     INSERT INTO nodes_fts(rowid, name, full_name, signature)
     VALUES (new.id, new.name, new.full_name, new.signature);
 END;
+
+-- ── compilation_units (xcg.md Section 9.1) ─────────────────────────
+
+CREATE TABLE IF NOT EXISTS compilation_units (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    root_file_id  INTEGER NOT NULL,
+    root_file_path TEXT NOT NULL,
+    filelist_path  TEXT,
+    defines_hash   TEXT,
+    incdirs_hash   TEXT,
+    source_hash    TEXT,
+    expanded_hash  TEXT,
+    created_at     TEXT,
+    updated_at     TEXT,
+    FOREIGN KEY (root_file_id) REFERENCES files(id) ON DELETE CASCADE
+);
+
+-- ── source_segments (xcg.md Section 9.2) ──────────────────────────
+
+CREATE TABLE IF NOT EXISTS source_segments (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    cu_id             INTEGER NOT NULL,
+    virtual_start     INTEGER NOT NULL,
+    virtual_end       INTEGER NOT NULL,
+    origin_file_id    INTEGER NOT NULL,
+    origin_file_path  TEXT NOT NULL,
+    origin_start      INTEGER NOT NULL,
+    origin_end        INTEGER NOT NULL,
+    include_stack_json TEXT,
+    FOREIGN KEY (cu_id) REFERENCES compilation_units(id) ON DELETE CASCADE
+);
+
+-- ── include_edges (xcg.md Section 9.3) ────────────────────────────
+
+CREATE TABLE IF NOT EXISTS include_edges (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    cu_id             INTEGER NOT NULL,
+    from_file_id      INTEGER NOT NULL,
+    from_file_path    TEXT NOT NULL,
+    to_file_id        INTEGER,
+    to_file_path      TEXT,
+    include_line      INTEGER NOT NULL,
+    include_text      TEXT,
+    resolved          INTEGER NOT NULL DEFAULT 1,
+    condition         TEXT,
+    include_stack_json TEXT,
+    FOREIGN KEY (cu_id) REFERENCES compilation_units(id) ON DELETE CASCADE
+);
+
+-- ── conditionals (xcg.md Section 9.4) ─────────────────────────────
+
+CREATE TABLE IF NOT EXISTS conditionals (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    cu_id                INTEGER NOT NULL,
+    file_id              INTEGER NOT NULL,
+    file_path            TEXT NOT NULL,
+    line_start           INTEGER NOT NULL,
+    line_end             INTEGER NOT NULL,
+    directive            TEXT NOT NULL,
+    condition            TEXT NOT NULL,
+    active               INTEGER NOT NULL,
+    active_branch_json   TEXT,
+    inactive_branch_json TEXT,
+    FOREIGN KEY (cu_id) REFERENCES compilation_units(id) ON DELETE CASCADE
+);

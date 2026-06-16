@@ -306,3 +306,24 @@ def format_reindex_result(result: dict) -> str:
     if result.get("errors"):
         lines.append(f"**Errors:** {len(result['errors'])}")
     return "\n".join(lines)
+
+
+def format_conditionals(results: list[dict], file_path: str) -> str:
+    """Format conditional compilation blocks (xcg.md Section 11.4)."""
+    if not results:
+        return f"## Conditionals: {file_path}\n\nNo conditional blocks found.\n"
+
+    lines = [f"## Conditionals: {file_path}", ""]
+    for c in results:
+        directive = c.get("directive", "?")
+        condition = c.get("condition", "?")
+        active = "active" if c.get("active") else "inactive"
+        line_no = c.get("line_start", "?")
+        active_branch = c.get("active_branch_json", "")
+        inactive_branch = c.get("inactive_branch_json", "")
+        lines.append(f"  Line {line_no}: {directive} {condition} ({active})")
+        if active_branch and active_branch != "[]":
+            lines.append(f"    active: {active_branch}")
+        if inactive_branch and inactive_branch != "[]":
+            lines.append(f"    inactive: {inactive_branch}")
+    return "\n".join(lines) + "\n"
