@@ -121,18 +121,36 @@ def format_node_detail(node: dict, edges: dict,
     if sig:
         lines.append(f"**Signature:** `{sig}`")
 
-    # Children — show kind for non-trivial types
+    # Children — grouped: methods (with prototypes) vs fields (with kinds)
     contains = edges.get("CONTAINS", [])
     if contains:
-        parts = []
+        methods = []
+        fields = []
         for c in contains:
             child_name = c["dst_name"]
             ckind = c.get("dst_kind", "")
-            if ckind and ckind not in ("function", "class", "module"):
-                parts.append(f"`{ckind}` {child_name}")
+            csig = c.get("dst_signature", "")
+            if ckind in ("function", "task", "method"):
+                methods.append((ckind, child_name, csig))
             else:
-                parts.append(child_name)
-        lines.append(f"**Contains:** {', '.join(parts)}")
+                fields.append((ckind, child_name))
+
+        if methods:
+            lines.append("**Methods:**")
+            for ckind, child_name, csig in methods:
+                if csig and csig != child_name:
+                    lines.append(f"- `{ckind}` `{csig}`")
+                else:
+                    lines.append(f"- `{ckind}` {child_name}")
+
+        if fields:
+            parts = []
+            for ckind, child_name in fields:
+                if ckind and ckind not in ("class", "module"):
+                    parts.append(f"`{ckind}` {child_name}")
+                else:
+                    parts.append(child_name)
+            lines.append(f"**Fields:** {', '.join(parts)}")
 
     # Relations
     for edge_kind in ("EXTENDS", "REFERENCES", "CALLS", "INSTANTIATES", "OVERRIDES",

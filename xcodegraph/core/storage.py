@@ -219,7 +219,8 @@ class Storage:
         for direction, col in [("out", "src_id"), ("in", "dst_id")]:
             key = "outgoing" if direction == "out" else "incoming"
             rows = self.conn.execute(
-                f"""SELECT e.*, sn.name as src_name, dn.name as dst_name, dn.kind as dst_kind
+                f"""SELECT e.*, sn.name as src_name, dn.name as dst_name,
+                           dn.kind as dst_kind, dn.signature as dst_signature
                     FROM edges e
                     JOIN nodes sn ON e.src_id = sn.id
                     JOIN nodes dn ON e.dst_id = dn.id
