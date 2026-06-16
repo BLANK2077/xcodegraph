@@ -185,12 +185,18 @@ class Storage:
         ]
 
     def get_edges_for_node(self, node_name: str) -> dict[str, list[dict]]:
-        """Return edges grouped by kind for a node."""
+        """Return edges grouped by kind for a node.
+
+        Includes both resolved edges and unresolved refs (lightweight resolve).
+        """
         node = self.get_node(node_name)
         if not node:
             return {}
 
         result: dict[str, list[dict]] = {}
+        node_id = node["id"]
+
+        # Resolved edges (outgoing + incoming)
         for direction, col in [("out", "src_id"), ("in", "dst_id")]:
             key = "outgoing" if direction == "out" else "incoming"
             rows = self.conn.execute(
@@ -199,9 +205,22 @@ class Storage:
                     JOIN nodes sn ON e.src_id = sn.id
                     JOIN nodes dn ON e.dst_id = dn.id
                     WHERE e.{col} = ?""",
-                (node["id"],),
+                (node_id,),
             ).fetchall()
             for r in rows:
+                d = dict(r)
+                kind = d["kind"]
+                result.setdefault(kind, [])
+                result[kind].append(d)
+
+        # Unresolved refs — lightweight same-file resolve
+        file_id = node.get("file_id")
+        if file_id:
+            refs = self.conn.execute(
+                "SELECT kind, name, line FROM unresolved_refs WHERE file_id = ?",
+                (file_id,),
+            ).fetchall()
+            for r in refs:
                 d = dict(r)
                 kind = d["kind"]
                 result.setdefault(kind, [])
