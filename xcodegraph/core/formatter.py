@@ -121,11 +121,18 @@ def format_node_detail(node: dict, edges: dict,
     if sig:
         lines.append(f"**Signature:** `{sig}`")
 
-    # Children
+    # Children — show kind for non-trivial types
     contains = edges.get("CONTAINS", [])
     if contains:
-        child_names = [c["dst_name"] for c in contains]
-        lines.append(f"**Contains:** {', '.join(child_names)}")
+        parts = []
+        for c in contains:
+            child_name = c["dst_name"]
+            ckind = c.get("dst_kind", "")
+            if ckind and ckind not in ("function", "class", "module"):
+                parts.append(f"`{ckind}` {child_name}")
+            else:
+                parts.append(child_name)
+        lines.append(f"**Contains:** {', '.join(parts)}")
 
     # Relations
     for edge_kind in ("EXTENDS", "REFERENCES", "CALLS", "INSTANTIATES", "OVERRIDES",
