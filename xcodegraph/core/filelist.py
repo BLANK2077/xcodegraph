@@ -31,7 +31,7 @@ class FilelistParser:
 
     COMMENT_RE = re.compile(r"^\s*(//|#)")
     BLANK_RE = re.compile(r"^\s*$")
-    INCDIR_RE = re.compile(r"^\+incdir\+(.*)$")
+    INCDIR_RE = re.compile(r"^\+incdir\+(\S+)")
     DEFINE_RE = re.compile(r"^\+define\+(\w+)(?:=(.*))?$")
 
     def __init__(self, initial_defines: dict[str, str] | None = None):
@@ -81,11 +81,16 @@ class FilelistParser:
 
                 line = os.path.expandvars(line)
 
-                # +incdir+
+                # +incdir+<path> [<trailing file>]
                 m = self.INCDIR_RE.match(line)
                 if m:
                     incdir = self._resolve_path(m.group(1), base_dir)
                     result.incdirs.append(incdir)
+                    # Rest of line after incdir path may be a source file
+                    rest = line[m.end():].strip()
+                    if rest:
+                        src_abs = self._resolve_path(rest, base_dir)
+                        result.files.append(src_abs)
                     continue
 
                 # +define+

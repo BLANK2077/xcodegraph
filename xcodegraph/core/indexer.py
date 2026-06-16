@@ -32,7 +32,18 @@ class Indexer:
         indexed_files = 0
         errors: list[str] = []
 
-        for src_path in fl_result.files:
+        all_files = list(fl_result.files)
+
+        # Discover .svh files from +incdir+ paths
+        for incdir in fl_result.incdirs:
+            if os.path.isdir(incdir):
+                for fn in sorted(os.listdir(incdir)):
+                    if fn.endswith(".svh") or fn.endswith(".vh"):
+                        svh_path = os.path.join(incdir, fn)
+                        if svh_path not in all_files:
+                            all_files.append(svh_path)
+
+        for src_path in all_files:
             if self._is_sv_file(src_path):
                 try:
                     with open(src_path, "r", encoding="utf-8", errors="replace") as f:
