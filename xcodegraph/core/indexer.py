@@ -47,8 +47,9 @@ class Indexer:
 
         for src_path in all_files:
             if self._is_sv_file(src_path):
-                if self._is_header(src_path) and not expand_includes:
-                    continue  # xcg.md: .svh/.vh in filelist → warning, skip
+                if self._is_header(src_path):
+                    # xcg.md: .svh/.vh are expanded into parent CUs, never standalone
+                    continue
 
                 try:
                     expanded = None
